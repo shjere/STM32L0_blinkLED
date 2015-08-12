@@ -1,0 +1,87 @@
+
+############################# PROJECT SETUP #############################
+# Put your stlink folder here so make burn will work.
+STLINK=/usr/local/bin/stlink
+
+# Add support for Cortex-M0+ and STM32L0 Discovery Board
+STM_COMMON = ../../common
+
+# Project name
+PROJ_NAME=test
+OUTPATH=build
+
+############################# ADDING C FILES #############################
+# Main sources
+SRCS = $(wildcard *.c)
+
+# STM32L0 library code
+SRCS += stm32l0xx_hal.c stm32l0xx_hal_adc.c stm32l0xx_hal_adc_ex.c stm32l0xx_hal_cortex.c stm32l0xx_hal_cryp.c 
+SRCS += stm32l0xx_hal_cryp_ex.c stm32l0xx_hal_dac.c stm32l0xx_hal_dac_ex.c stm32l0xx_hal_flash.c stm32l0xx_hal_flash_ex.c
+SRCS += stm32l0xx_hal_flash_ramfunc.c stm32l0xx_hal_gpio.c stm32l0xx_hal_i2c.c stm32l0xx_hal_i2c_ex.c stm32l0xx_hal_i2s.c
+SRCS += stm32l0xx_hal_irda.c stm32l0xx_hal_iwdg.c stm32l0xx_hal_lcd.c stm32l0xx_hal_lptim.c stm32l0xx_hal_msp_template.c 
+SRCS += stm32l0xx_hal_pcd.c stm32l0xx_hal_pcd_ex.c stm32l0xx_hal_pwr.c stm32l0xx_hal_pwr_ex.c stm32l0xx_hal_rcc.c 
+SRCS += stm32l0xx_hal_rcc_ex.c stm32l0xx_hal_rng.c stm32l0xx_hal_rtc.c stm32l0xx_hal_rtc_ex.c stm32l0xx_hal_smartcard.c 
+SRCS += stm32l0xx_hal_smartcard_ex.c stm32l0xx_hal_smbus.c stm32l0xx_hal_spi.c stm32l0xx_hal_tim.c stm32l0xx_hal_tim_ex.c
+SRCS += stm32l0xx_hal_tsc.c stm32l0xx_hal_uart.c stm32l0xx_hal_uart_ex.c stm32l0xx_hal_usart.c stm32l0xx_hal_wwdg.c
+
+SRCS += $(wildcard $(STM_COMMON)/stm32l0discovery/Drivers/STM32L0xx_HAL_Driver/Src/*.c)
+
+############################# STARTUP FILE #############################
+
+# add startup file to build
+SRCS += $(STM_COMMON)/startup/startup_stm32l053xx.s
+
+############################# BUILD SETUP #############################
+CC=arm-none-eabi-gcc
+OBJCOPY=arm-none-eabi-objcopy
+SIZE=arm-none-eabi-size
+
+# Choose debug or release...
+CFLAGS = -g -O2           # Normal
+#CFLAGS = -ggdb -O0       # RSW - for GDB debugging, disable optimizer
+
+CFLAGS += -TSTM32L053C8_FLASH.ld
+CFLAGS += -DUSE_HAL_DRIVER
+CFLAGS += -mlittle-endian -mthumb -mthumb-interwork -mcpu=cortex-m0plus
+CFLAGS += -msoft-float
+
+############################# PATH SETUP #############################
+VPATH = %.c \
+$(STM_COMMON)/stm32l0discovery/Drivers/STM32L0xx_HAL_Driver/Src \
+$(STM_COMMON)/stm32l0discovery/Drivers/BSP/STM32L0538-Discovery
+
+# Includes
+CFLAGS += -I.
+CFLAGS += -I$(STM_COMMON)/stm32l0discovery/Drivers/CMSIS/Device/ST/STM32L0xx/Include
+CFLAGS += -I$(STM_COMMON)/stm32l0discovery/Drivers/BSP/STM32L0538-Discovery
+CFLAGS += -I$(STM_COMMON)/stm32l0discovery/Drivers/CMSIS/Include
+CFLAGS += -I$(STM_COMMON)/stm32l0discovery/Drivers/STM32L0xx_HAL_Driver/Inc
+
+OBJS = $(SRCS:.c=.o)
+
+################################ TARGETS ################################
+.PHONY: lib proj dir_tree
+
+all:  dir_tree proj
+
+dir_tree:
+	mkdir -p $(OUTPATH)
+
+proj: $(OUTPATH)/$(PROJ_NAME).elf
+	$(SIZE) $(OUTPATH)/$(PROJ_NAME).elf
+
+$(OUTPATH)/$(PROJ_NAME).elf: $(SRCS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LIBPATHS) $(LIBS)
+	$(OBJCOPY) -O ihex $(OUTPATH)/$(PROJ_NAME).elf $(OUTPATH)/$(PROJ_NAME).hex
+	$(OBJCOPY) -O binary $(OUTPATH)/$(PROJ_NAME).elf $(OUTPATH)/$(PROJ_NAME).bin
+
+clean:
+	find . -name \*.o -type f -delete
+	find . -name \*.lst -type f -delete
+	rm -f $(OUTPATH)/$(PROJ_NAME).elf
+	rm -f $(OUTPATH)/$(PROJ_NAME).hex
+	rm -f $(OUTPATH)/$(PROJ_NAME).bin
+
+# Flash the STM32L0
+burn: proj
+	$(STLINK)/st-flash write $(OUTPATH)/$(PROJ_NAME).bin 0x8000000

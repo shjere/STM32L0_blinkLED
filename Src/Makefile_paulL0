@@ -1,0 +1,126 @@
+
+# Turn on increased build verbosity by defining BUILD_VERBOSE in your main
+# Makefile or in your environment. You can also use V=1 on the make command
+# line.
+
+# Put your stlink folder here so make burn will work.
+STLINK=/usr/local/bin/stlink
+
+ifeq ("$(origin V)", "command line")
+BUILD_VERBOSE=$(V)
+endif
+ifndef BUILD_VERBOSE
+BUILD_VERBOSE = 1
+endif
+ifeq ($(BUILD_VERBOSE),0)
+Q = @
+else
+Q =
+endif
+# Since this is a new feature, advertise it
+ifeq ($(BUILD_VERBOSE),0)
+$(info Use make V=1 or set BUILD_VERBOSE in your environment to increase build verbosity.)
+endif
+
+BUILD ?= build
+
+RM = rm
+ECHO = @echo
+
+CROSS_COMPILE = arm-none-eabi-
+
+AS = $(CROSS_COMPILE)as
+CC = $(CROSS_COMPILE)gcc
+LD = $(CROSS_COMPILE)ld
+OBJCOPY = $(CROSS_COMPILE)objcopy
+SIZE = $(CROSS_COMPILE)size
+
+TOP = ../../common
+INC =  -I../Inc
+INC += -I$(TOP)/stm32l0discovery/Drivers/STM32L0xx_HAL_Driver/Inc
+INC += -I$(TOP)/stm32l0discovery/Drivers/CMSIS/Device/ST/STM32L0xx/Include
+INC += -I$(TOP)/stm32l0discovery/Drivers/BSP/STM32L0538-Discovery
+INC += -I$(TOP)/stm32l0discovery/Drivers/CMSIS/Include
+
+#CFLAGS_CORTEX_M0PLUS = -mthumb -mtune=cortex-m0plus -mabi=aapcs-linux -mcpu=cortex-m0plus -fsingle-precision-constant   
+#CFLAGS = $(INC) -DSTM32L053xx -Wall -ansi -std=gnu99 $(CFLAGS_CORTEX_M0PLUS) $(COPT)
+
+CFLAGS = -g -O2           # Normal
+#CFLAGS = -ggdb -O0       # RSW - for GDB debugging, disable optimizer
+
+CFLAGS += -TSTM32L053C8_FLASH.ld
+#CFLAGS += -DUSE_HAL_DRIVER
+CFLAGS += -mlittle-endian -mthumb -mthumb-interwork -mcpu=cortex-m0plus
+CFLAGS += -msoft-float
+CFLAGS += -lm -lc
+
+
+#Debugging/Optimization
+ifeq ($(DEBUG), 1)
+CFLAGS += -g -DPENDSV_DEBUG
+COPT = -O0
+else
+COPT += -Os -DNDEBUG
+endif
+
+LDFLAGS = --nostdlib -TSTM32L053C8_FLASH.ld -Map=$(@:.elf=.map) --cref
+
+OBJ = \
+	#build/startup_stm32l053xx.o \
+	build/main.o \
+	build/stm32l0xx_it.o \
+	build/system_stm32l0xx.o \
+	#build/stm32l0_discovery.o \
+	build/stm32l0xx_hal.o \
+	build/stm32l0xx_hal_cortex.o \
+	build/stm32l0xx_hal_dma.o \
+	build/stm32l0xx_hal_gpio.o \
+	build/stm32l0xx_hal_i2c.o \
+	build/stm32l0xx_hal_rcc.o \
+	build/stm32l0xx_hal_spi.o 
+
+all: $(BUILD)/flash.elf
+
+#define compile_c
+	$(ECHO) "CC $<"
+	$(Q)$(CC) $(CFLAGS) -c -MD -o $@ $<
+@# The following fixes the dependency file.
+@# See http://make.paulandlesley.org/autodep.html for details.
+@cp $(@:.o=.d) $(@:.o=.P); \
+  sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' \
+      -e '/^$$/ d' -e 's/$$/ :/' < $(@:.o=.d) >> $(@:.o=.P); \
+  rm -f $(@:.o=.d)
+#endef
+
+$(OBJ): | $(BUILD)
+$(BUILD):
+	mkdir -p $@
+
+vpath %.s .
+$(BUILD)/%.o: %.s
+	$(ECHO) "AS $<"
+	$(Q)$(AS) -o $@ $<
+
+vpath %.c ../Src $(TOP)/stm32l0discovery/Drivers/BSP/STM32L0538-Discovery $(TOP)/stm32l0discovery/Drivers/STM32L0xx_HAL_Driver/Src
+$(BUILD)/%.o: %.c
+	$(call compile_c)
+
+pgm: $(BUILD)/flash.bin
+	dfu-util -a 0 -D $^ -s 0x8000000:leave
+
+burn: $(BUILD)/flash.bin
+	$(STLINK)/st-flash write build/flash.bin 0x8000000
+
+$(BUILD)/flash.bin: $(BUILD)/flash.elf
+	$(OBJCOPY) -O binary $^ $@
+
+$(BUILD)/flash.elf: $(OBJ)
+	$(ECHO) "LINK $@"
+	$(Q)$(CC) $(CFLAGS) -o $@ $(OBJ) $(LIBS)
+	$(Q)$(SIZE) $@
+
+clean:
+	$(RM) -rf $(BUILD)
+.PHONY: clean
+
+-include $(OBJ:.o=.P)
